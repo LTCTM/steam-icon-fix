@@ -2,7 +2,6 @@ import logging
 import os
 import re
 import winreg
-from itertools import chain
 from pathlib import Path
 
 import httpx
@@ -68,30 +67,32 @@ def flush_icon() -> None:
         os.system(cmd)
 
 
-def get_valid_steam_shortcuts(path: Path) -> list[tuple[str, str]]:
+def get_url_infos_for_download(search_dir: Path) -> list[tuple[str, str]]:
     """
     获取目录中所有有效的Steam快捷方式
 
-    :param path: 目录路径
-    :return: 包含有效(URL, IconFile, FilePath)元组的列表
+    :param search_dir: 目录路径
+    :return: 包含有效(URL, IconFile)元组的列表
     """
+    url_file_paths = [p for p in search_dir.glob("*") if p.suffix.lower() == ".url"]
     result = []
-    for url_file_path in chain(path.glob("*.url"), path.glob("*.URL")):
+    for url_file_path in url_file_paths:
         content = url_file_path.read_text(encoding="utf-8")
-        url = re.search(r"URL=(.*)", content)
-        icon_file = re.search(r"IconFile=(.*)", content)
-        if not (url and icon_file):
+        match_url = re.search(r"URL=(.*)", content)
+        match_icon_file = re.search(r"IconFile=(.*)", content)
+        if not (match_url and match_icon_file):
             continue
-        url = url.group(1).strip()
-        icon_file = icon_file.group(1).strip()
+        url = match_url.group(1).strip()
+        icon_file = match_icon_file.group(1).strip()
         try:
+            icon_file = Path(icon_file)
             # 这里try的是防止icon_file不是合法的文件路径
-            if re.match(r"steam://rungameid/\d+", url) and Path(icon_file).suffix.lower() == ".ico":
-                result.append((url, icon_file, url_file_path))
-            else:
-                logger.error(f"Invalid url in {url_file_path.name}")
+            if (re.match(r"steam://rungameid/\d+", url) and icon_file.suffix.lower() == ".ico") and (
+                not icon_file.exists() or icon_file.stat().st_size == 0
+            ):
+                result.append((url, icon_file))
         except:
-            logger.error(f"Invalid IconFile in {url_file_path.name}")
+            pass
     return result
 
 
@@ -134,30 +135,26 @@ def main():
             logger.error("Path not exist. Exiting...")
             return
     # 收集所有.url文件
-    url_files = get_valid_steam_shortcuts(desktop_dir)
+    url_files = get_url_infos_for_download(desktop_dir)
     # 可选的开始菜单文件夹
     start_menu_dir = Path(os.getenv("ProgramData", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Steam"
     if start_menu_dir.exists():
-        url_files.extend(get_valid_steam_shortcuts(start_menu_dir))
+        url_files.extend(get_url_infos_for_download(start_menu_dir))
     # ====main====
     # icon_base_url = "http://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/"
     icon_base_url = "http://mirror-api.ltctm.net/steam-icon/steamcommunity/public/images/apps/"
-    for url, icon_file, url_file_path in url_files:
+    for url, icon_file in url_files:
         app_id = url.split("/")[-1]
         icon_name = Path(icon_file).name
         download_url = f"{icon_base_url}{app_id}/{icon_name}"
         save_path = steam_icon_dir / icon_name
-        if save_path.exists() and save_path.stat().st_size > 0:
-            logger.info(f"Found Steam Shortcut {url_file_path.name} with appid {app_id}")
-        else:
-            logger.info(f"Try to download icon of appid {app_id} to {save_path.name}")
-            download_file(download_url, save_path)
+        logger.info(f"Try to download icon of appid {app_id} to {save_path.name}")
+        download_file(download_url, save_path)
 
     logger.info("Finish Fixing, Flushing icon cache...")
     flush_icon()
     logger.info("Success!")
 
-
 if __name__ == "__main__":
     main()
-    os.system("pause")
+    # os.system("pause")
