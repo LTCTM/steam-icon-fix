@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -19,25 +20,39 @@ logging.getLogger("httpx").propagate = False
 # ================
 
 
-def download_file(url: str, path: Path, timeout: float = 5.0):
-    """下载文件
-    :param url: 下载URL
-    :param path: 保存路径
-    :param timeout: 下载超时时间(秒)，默认5秒
-    :return: HTTP状态码或None(失败)
-    """
-    try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            response = client.get(url)
-            if response.is_success:
-                path.write_bytes(response.content)
-                return True
-            else:
-                logger.error(f"Download failed! {response.status_code}: {response.text}")
-                return False
-    except httpx.TimeoutException:
-        logger.error(f"Download timed out after {timeout} seconds")
-        return False
+class IconDownloader:
+    async_lock = asyncio.Semaphore(8)
+
+    def __init__(self, timeout=5.0):
+        self._time_out = timeout
+        # base_url = "http://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps"
+        self._client = httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            base_url="http://mirror-api.ltctm.net/steam-icon/steamcommunity/public/images/apps",
+        )
+
+    async def download_icon(self, app_id: str, icon_file: Path):
+        """下载文件
+        :param url: 下载URL
+        :param path: 保存路径
+        :param timeout: 下载超时时间(秒)，默认5秒
+        :return: HTTP状态码或None(失败)
+        """
+        async with IconDownloader.async_lock:
+            try:
+                response = await self._client.get(f"{app_id}/{icon_file.name}")
+                if response.is_success:
+                    icon_file.write_bytes(response.content)
+                    logger.info(f"Download icon of <{app_id}> success")
+                    result = True
+                else:
+                    logger.error(f"Download icon of <{app_id}> failed! {response.status_code}: {response.text}")
+                    result = False
+            except httpx.TimeoutException:
+                logger.error(f"Download icon of <{app_id}> timed out")
+                result = False
+        return result
 
 
 def flush_icon() -> None:
@@ -67,12 +82,11 @@ def flush_icon() -> None:
         os.system(cmd)
 
 
-def get_url_infos_for_download(search_dir: Path) -> list[tuple[str, str]]:
+def get_game_infos_for_download(search_dir: Path) -> list[tuple[str, str]]:
     """
     获取目录中所有有效的Steam快捷方式
-
     :param search_dir: 目录路径
-    :return: 包含有效(URL, IconFile)元组的列表
+    :return: 包含有效(URL:str, IconFile:Path)元组的列表
     """
     url_file_paths = [p for p in search_dir.glob("*") if p.suffix.lower() == ".url"]
     result = []
@@ -101,14 +115,14 @@ def get_steam_install_path() -> Path:
     :return: Steam安装路径或None
     """
     try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam") as key:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Valve\\Steam") as key:
             install_path = winreg.QueryValueEx(key, "InstallPath")[0]
             return Path(install_path)
     except WindowsError:
         return None
 
 
-def main():
+async def main():
     # 获取Steam安装路径
     steam_path = get_steam_install_path()
     if not steam_path:
@@ -116,45 +130,22 @@ def main():
         return
     # 找到steam_icon_dir
     steam_icon_dir = steam_path / "steam" / "games"
-    if steam_icon_dir.exists():
-        logger.info(f"Found Steam icon dir in {steam_icon_dir}")
-    else:
-        logger.warning("Cannot find steam icon dir, manual input> ")
-        user_input = input().strip()
-        steam_icon_dir = Path(user_input)
-        if not steam_icon_dir.exists():
-            logger.error("Path not exist. Exiting...")
-            return
-    # 获取桌面路径
-    desktop_dir = Path.home() / "Desktop"
-    if not desktop_dir.exists():
-        logger.warning("Cannot find desktop dir, manual input> ")
-        user_input = input().strip()
-        desktop_dir = Path(user_input)
-        if not desktop_dir.exists():
-            logger.error("Path not exist. Exiting...")
-            return
+    if not steam_icon_dir.exists():
+        steam_icon_dir.mkdir(parents=True, exist_ok=True)
     # 收集所有.url文件
-    url_files = get_url_infos_for_download(desktop_dir)
-    # 可选的开始菜单文件夹
+    desktop_dir = Path.home() / "Desktop"
     start_menu_dir = Path(os.getenv("ProgramData", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Steam"
-    if start_menu_dir.exists():
-        url_files.extend(get_url_infos_for_download(start_menu_dir))
-    # ====main====
-    # icon_base_url = "http://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/"
-    icon_base_url = "http://mirror-api.ltctm.net/steam-icon/steamcommunity/public/images/apps/"
-    for url, icon_file in url_files:
-        app_id = url.split("/")[-1]
-        icon_name = Path(icon_file).name
-        download_url = f"{icon_base_url}{app_id}/{icon_name}"
-        save_path = steam_icon_dir / icon_name
-        logger.info(f"Try to download icon of appid {app_id} to {save_path.name}")
-        download_file(download_url, save_path)
-
+    target_dirs = [target_dir for target_dir in (desktop_dir, start_menu_dir) if target_dir.exists()]
+    game_infos = [game_info for tdir in target_dirs for game_info in get_game_infos_for_download(tdir)]
+    # ================main================
+    downloader = IconDownloader()
+    coroutines = [downloader.download_icon(url.split("/")[-1], icon_file) for url, icon_file in game_infos]
+    await asyncio.gather(*coroutines)
+    # ====
     logger.info("Finish Fixing, Flushing icon cache...")
     flush_icon()
-    logger.info("Success!")
+    logger.info("Done!")
+
 
 if __name__ == "__main__":
-    main()
-    # os.system("pause")
+    asyncio.run(main())
