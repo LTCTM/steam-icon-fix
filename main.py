@@ -25,11 +25,10 @@ class IconDownloader:
 
     def __init__(self, timeout=5.0):
         self._time_out = timeout
-        # base_url = "http://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps"
         self._client = httpx.AsyncClient(
             timeout=timeout,
             follow_redirects=True,
-            base_url="http://mirror-api.ltctm.net/steam-icon/steamcommunity/public/images/apps",
+            base_url="http://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps",
         )
 
     async def download_icon(self, app_id: str, icon_file: Path):
