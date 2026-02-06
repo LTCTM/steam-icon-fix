@@ -21,7 +21,8 @@ logging.getLogger("httpx").propagate = False
 
 
 class IconDownloader:
-    async_lock = asyncio.Semaphore(8)
+    # 限制同时下载的并发数为 5
+    async_lock = asyncio.Semaphore(5)
 
     def __init__(self, timeout=5.0):
         self._time_out = timeout

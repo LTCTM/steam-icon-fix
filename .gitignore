@@ -136,3 +136,9 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# Go build outputs
+fixSteamIcon.exe
+*.exe
+*.test
+*.out
