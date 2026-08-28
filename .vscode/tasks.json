@@ -4,16 +4,42 @@
         {
             "label": "go build fixSteamIcon",
             "type": "shell",
-            "command": "go build -o fixSteamIcon.exe main.go",
+            "command": "go",
+            "args": [
+                "build",
+                "-ldflags=-s -w",
+                "-trimpath",
+                "-o",
+                "fixSteamIcon.exe",
+                "."
+            ],
             "options": {
-                "cwd": "${workspaceFolder}"
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "CGO_ENABLED": "0"
+                }
             },
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
             "problemMatcher": []
+        },
+        {
+            "label": "go build fixSteamIcon (default)",
+            "type": "shell",
+            "command": "go",
+            "args": [
+                "build",
+                "-o",
+                "fixSteamIcon.exe",
+                "main.go"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": []
         }
     ]
 }
-

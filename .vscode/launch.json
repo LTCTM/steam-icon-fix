@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "main",
+            "name": "fixSteamIcon (py)",
             "type": "debugpy",
             "request": "launch",
             "module": "main",
